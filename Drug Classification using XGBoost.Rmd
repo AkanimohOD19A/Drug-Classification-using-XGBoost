@@ -1,0 +1,116 @@
+---
+title: "Drug Classification using XGBoost"
+output: html_notebook
+---
+
+
+## Load Dependencies
+
+```{r echo = FALSE, message=FALSE}
+library(tidyverse)
+library(data.table)
+
+
+drug_df <- read.csv("C:/Users/PC/Documents/R_4DS/drug200.csv")
+glimpse(drug_df)
+```
+
+
+## Data Inspection and Cleaning
+
+```{r}
+all(is.na(drug_df)) ## No missing value
+
+null_vars <- (sapply(drug_df, function(x) sum(is.na(x))))
+t(data.frame(null_vars))
+```
+
+```{r}
+## strip the "Drug" Prefix
+df <- drug_df %>% 
+  mutate(Sex = if_else(Sex == "M", 1, 0)) %>% 
+  mutate(BP = if_else(BP == "LOW", 0, 
+                      if_else(BP == "NORMAL", 1, 2))) %>% 
+  mutate(Cholesterol = if_else(Cholesterol == "LOW", 0, 
+                      if_else(Cholesterol == "NORMAL", 1, 2))) %>% 
+  transform(Drug = str_replace(Drug,"Drug","")) %>% 
+  transform(Drug = str_replace(Drug,"drug","")) %>% 
+  mutate(y = case_when(
+    Drug == 'A' ~ 1,
+    Drug == 'B' ~ 2,
+    Drug == 'C' ~ 3,
+    Drug == 'X' ~ 4,
+    TRUE ~ 5
+  )) %>% 
+  select(-Drug)
+```
+
+
+## Exploratory Data Analysis
+
+
+## Model Fitting
+
+```{r}
+## Split Data
+## Train-Test
+n_split <- round(0.8 * nrow(df))
+train_indices <- sample(1:nrow(df), n_split)
+train_set <- df[train_indices, ]
+test_set <- df[-train_indices, ]
+
+# train_y <- train_set$y
+# train_set <- train_set %>% 
+#   select(-y)
+
+## To-Matrix for XGBoost
+trainMatrix <- train_set %>% as.matrix
+testMatrix <- test_set %>% as.matrix
+```
+
+
+```{r}
+library(xgboost)
+
+numberOfClasses <- max(train_set$y) + 1
+
+param <- list("objective" = "multi:softprob",
+              "eval_metric" = "mlogloss",
+              "num_class" = numberOfClasses)
+
+cv.nround <- 5
+cv.nfold <- 3
+
+bst.cv = xgb.cv(param=param, data = trainMatrix, label = train_set$y, 
+                nfold = cv.nfold, nrounds = cv.nround)
+```
+
+```{r Model Training}
+nround = 50
+bst = xgboost(param=param, data = trainMatrix, label = train_set$y, nrounds=nround)
+```
+
+
+## Model Evaluation
+```{r}
+model <- xgb.dump(bst, with.stats = T)
+model[1:10]
+```
+
+
+
+```{r importanceFeature, fig.align='center', fig.height=5, fig.width=10}
+# Get the feature real names
+names <- dimnames(trainMatrix)[[2]]
+
+# Compute feature importance matrix
+importance_matrix <- xgb.importance(names, model = bst)
+
+# Nice graph
+xgb.plot.importance(importance_matrix[1:10,])
+```
+
+
+```{r treeGraph, dpi=1500, fig.align='left'}
+xgb.plot.tree(feature_names = names, model = bst, n_first_tree = 2)
+```
